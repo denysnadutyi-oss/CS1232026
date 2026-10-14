@@ -66,19 +66,53 @@ static void child_fail(int wfd, int stage, int err)
 
 /* Усе, що дитина робить між fork і exec. Не повертається.
  * wfd — кінець каналу звіту для запису (з O_CLOEXEC). */
+
 static void child_setup_and_exec(const struct opts *o, int wfd)
 {
-    /* TODO 2a, у такому порядку:
-     *   1) -C: chdir; помилка → child_fail(wfd, ST_CHDIR, errno);
-     *   2) -u: unsetenv для кожного імені, потім -e: putenv для кожної пари;
-     *   3) -o: open(ФАЙЛ, O_WRONLY | O_CREAT | O_TRUNC | ..., 0644) і dup2 на 1;
-     *      у режимі -d ще й stdin ← /dev/null, stdout і stderr ← ФАЙЛ або
-     *      /dev/null; будь-яка помилка → child_fail(wfd, ST_OPEN, errno);
-     *   4) execvp; якщо повернувся → child_fail(wfd, ST_EXEC, errno).
-     * Після fork у дитині — лише async-signal-safe виклики (man 7 signal-safety):
-     * жодного printf, жодного exit. Чому? */
-    (void)o;
-    child_fail(wfd, ST_EXEC, ENOSYS);
+    if (o->dir && chdir(o->dir) == -1)
+        child_fail(wfd, ST_CHDIR, errno);
+
+    for (int i = 0; i < o->nunset; i++) {
+        if (unsetenv(o->unset[i]) == -1)
+            child_fail(wfd, ST_EXEC, errno);
+    }
+
+    for (int i = 0; i < o->nset; i++) {
+        if (putenv(o->set[i]) == -1)
+            child_fail(wfd, ST_EXEC, errno);
+    }
+
+    if (o->daemon) {
+        int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+        if (fd == -1)
+            child_fail(wfd, ST_OPEN, errno);
+
+        if (dup2(fd, STDIN_FILENO) == -1)
+            child_fail(wfd, ST_OPEN, errno);
+
+        close(fd);
+    }
+
+    if (o->out || o->daemon) {
+        const char *path = o->out ? o->out : "/dev/null";
+
+        int fd = open(path,
+                      O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+                      0644);
+        if (fd == -1)
+            child_fail(wfd, ST_OPEN, errno);
+
+        if (dup2(fd, STDOUT_FILENO) == -1)
+            child_fail(wfd, ST_OPEN, errno);
+
+        if (o->daemon && dup2(fd, STDERR_FILENO) == -1)
+            child_fail(wfd, ST_OPEN, errno);
+
+        close(fd);
+    }
+
+    execvp(o->argv[0], o->argv);
+    child_fail(wfd, ST_EXEC, errno);
 }
 
 static const char *stage_name(const struct opts *o, int stage)
@@ -111,19 +145,85 @@ static pid_t wait_child(pid_t pid, int *status)
     return w;
 }
 
+
 static int run_foreground(const struct opts *o)
 {
-    /* TODO 2b:
-     *   1) канал звіту: pipe2(..., O_CLOEXEC) — чому саме з цим прапорцем?
-     *   2) fflush(NULL), fork; у дитині закрити кінець для читання і викликати
-     *      child_setup_and_exec;
-     *   3) у батька закрити кінець для запису, logmsg("start pid=%d cmd=%s\n", ...),
-     *      read_report: 1 → дитина повідомила про помилку, 0 → exec вдався;
-     *   4) wait_child; розібрати статус макросами WIFEXITED / WEXITSTATUS /
-     *      WIFSIGNALED / WTERMSIG і повернути код за специфікацією;
-     *      у журнал — "exit pid=%d code=%d\n" або "signal pid=%d sig=%d\n". */
-    (void)o;
-    fprintf(stderr, "launch: not implemented\n");
+    int pfd[2];
+
+    if (pipe2(pfd, O_CLOEXEC) == -1) {
+        fprintf(stderr, "launch: pipe2: %s\n", strerror(errno));
+        return 1;
+    }
+
+    fflush(NULL);
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        int err = errno;
+        close(pfd[0]);
+        close(pfd[1]);
+        fprintf(stderr, "launch: fork: %s\n", strerror(err));
+        return 1;
+    }
+
+    if (pid == 0) {
+        close(pfd[0]);
+        child_setup_and_exec(o, pfd[1]);
+        _exit(127);
+    }
+
+    close(pfd[1]);
+
+    logmsg("start pid=%d cmd=%s\n", (int)pid, o->argv[0]);
+
+    struct report r;
+    int result = read_report(pfd[0], &r);
+    int read_err = errno;
+    close(pfd[0]);
+
+    int status;
+    if (wait_child(pid, &status) == -1) {
+        fprintf(stderr, "launch: waitpid: %s\n", strerror(errno));
+        return 1;
+    }
+
+    if (result == -1) {
+        fprintf(stderr, "launch: read: %s\n", strerror(read_err));
+        return 1;
+    }
+
+    if (result == 1) {
+        int code = r.stage == ST_EXEC
+                   ? (r.value == ENOENT ? 127 : 126)
+                   : 1;
+
+        fprintf(stderr, "launch: %s: %s\n",
+                stage_name(o, r.stage), strerror(r.value));
+
+        logmsg("fail pid=%d cmd=%s error=%d\n",
+               (int)pid, o->argv[0], r.value);
+
+        return code;
+    }
+
+    if (WIFEXITED(status)) {
+        int code = WEXITSTATUS(status);
+
+        logmsg("exit pid=%d code=%d\n", (int)pid, code);
+        return code;
+    }
+
+    if (WIFSIGNALED(status)) {
+        int sig = WTERMSIG(status);
+
+        fprintf(stderr, "launch: %s: killed by signal %d\n",
+                o->argv[0], sig);
+
+        logmsg("signal pid=%d sig=%d\n", (int)pid, sig);
+        return 128 + sig;
+    }
+
     return 1;
 }
 
@@ -165,8 +265,8 @@ int main(int argc, char *argv[])
     o.argv = argv + optind;
 
     if (o.log) {
-        logfd = open(o.log, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (logfd == -1) {
+       logfd = open(o.log, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+             if (logfd == -1) {
             fprintf(stderr, "launch: %s: %s\n", o.log, strerror(errno));
             return 1;
         }
