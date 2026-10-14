@@ -227,16 +227,135 @@ static int run_foreground(const struct opts *o)
     return 1;
 }
 
+
 static int run_daemon(const struct opts *o)
 {
-    /* TODO 3: подвійний fork, setsid, umask(022), chdir("/") (якщо немає -C),
-     * PID онука — першим повідомленням ST_PID у канал звіту, потім
-     * child_setup_and_exec. Батько: дочекатися проміжного процесу, прочитати
-     * PID демона, потім дочекатися EOF або помилки; у разі успіху — PID-файл
-     * і "daemon pid=%d cmd=%s\n" у журнал. Покроково — у частині 3 роботи. */
-    (void)o;
-    fprintf(stderr, "launch: -d not implemented\n");
-    return 1;
+    int pfd[2];
+
+    if (pipe2(pfd, O_CLOEXEC) == -1) {
+        fprintf(stderr, "launch: pipe2: %s\n", strerror(errno));
+        return 1;
+    }
+
+    fflush(NULL);
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        int err = errno;
+        close(pfd[0]);
+        close(pfd[1]);
+        fprintf(stderr, "launch: fork: %s\n", strerror(err));
+        return 1;
+    }
+
+    if (pid == 0) {
+        close(pfd[0]);
+
+        if (setsid() == -1)
+            child_fail(pfd[1], ST_EXEC, errno);
+
+        pid_t daemon_pid = fork();
+
+        if (daemon_pid == -1)
+            child_fail(pfd[1], ST_EXEC, errno);
+
+        if (daemon_pid > 0)
+            _exit(0);
+
+        umask(022);
+
+        if (!o->dir && chdir("/") == -1)
+            child_fail(pfd[1], ST_CHDIR, errno);
+
+        struct report pid_report = { ST_PID, (int)getpid() };
+
+        if (write(pfd[1], &pid_report, sizeof pid_report)
+            != (ssize_t)sizeof pid_report)
+            _exit(1);
+
+        child_setup_and_exec(o, pfd[1]);
+        _exit(127);
+    }
+
+    close(pfd[1]);
+
+    int status;
+    if (wait_child(pid, &status) == -1) {
+        fprintf(stderr, "launch: waitpid: %s\n", strerror(errno));
+        close(pfd[0]);
+        return 1;
+    }
+
+    struct report r;
+    int result = read_report(pfd[0], &r);
+
+    if (result != 1) {
+        close(pfd[0]);
+        fprintf(stderr, "launch: daemon startup failed\n");
+        return 1;
+    }
+
+    if (r.stage != ST_PID) {
+        close(pfd[0]);
+        fprintf(stderr, "launch: %s: %s\n",
+                stage_name(o, r.stage), strerror(r.value));
+
+        return r.stage == ST_EXEC
+               ? (r.value == ENOENT ? 127 : 126)
+               : 1;
+    }
+
+    pid_t daemon_pid = (pid_t)r.value;
+
+    result = read_report(pfd[0], &r);
+    int read_err = errno;
+    close(pfd[0]);
+
+    if (result == -1) {
+        fprintf(stderr, "launch: read: %s\n", strerror(read_err));
+        return 1;
+    }
+
+    if (result == 1) {
+        fprintf(stderr, "launch: %s: %s\n",
+                stage_name(o, r.stage), strerror(r.value));
+
+        logmsg("fail pid=%d cmd=%s error=%d\n",
+               (int)daemon_pid, o->argv[0], r.value);
+
+        return r.stage == ST_EXEC
+               ? (r.value == ENOENT ? 127 : 126)
+               : 1;
+    }
+
+    if (o->pidfile) {
+        int fd = open(o->pidfile,
+                      O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+                      0644);
+
+        if (fd == -1) {
+            fprintf(stderr, "launch: %s: %s\n",
+                    o->pidfile, strerror(errno));
+            return 1;
+        }
+
+        char buf[64];
+        int n = snprintf(buf, sizeof buf, "%d\n", (int)daemon_pid);
+
+        if (write(fd, buf, (size_t)n) != n) {
+            fprintf(stderr, "launch: %s: write failed\n", o->pidfile);
+            close(fd);
+            return 1;
+        }
+
+        close(fd);
+    }
+
+    logmsg("daemon pid=%d cmd=%s\n",
+           (int)daemon_pid, o->argv[0]);
+
+    return 0;
 }
 
 int main(int argc, char *argv[])
