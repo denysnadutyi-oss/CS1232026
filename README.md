@@ -39,6 +39,10 @@ lab05/
 ├── README.md                — завдання роботи
 ├── starter/                 — selfinfo, launch, forkcost, calc і Makefile: скопіюйте все до свого каталогу
 └── submissions/
+lab06/
+├── README.md                — завдання роботи
+├── starter/                 — heapprobe, frag, stackprobe, kvcache і Makefile: скопіюйте все до свого каталогу
+└── submissions/
 tools/
 ├── make-bisect-repo.sh      — навчальний репозиторій для вправи з git bisect (ЛР 3)
 ├── echo-test.py             — перевірка echo-сервера (додаткова робота з моделей I/O)
@@ -47,7 +51,9 @@ tools/
 ├── wordfreq-test.py         — перевірка wordfreq і її обробки помилок (ЛР 4)
 ├── gen-text.py              — детермінований корпус текстів для вимірювань (ЛР 4)
 ├── bench.py                 — медіана кількох запусків команди (ЛР 4)
-└── lab05-test.py            — тести launch і calc (ЛР 5)
+├── lab05-test.py            — тести launch і calc (ЛР 5)
+├── kv-gen.py                — детерміноване навантаження для kvcache (ЛР 6)
+└── lab06-test.py            — тести heapprobe, frag, stackprobe і kvcache (ЛР 6)
 ```
 
 ## Правила

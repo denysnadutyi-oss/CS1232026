@@ -43,6 +43,18 @@ in.txt
 *.out
 *.pid
 *.log
+# ЛР 6
+heapprobe
+frag
+stackprobe
+stackprobe-O0
+stackprobe-noclash
+kvcache
+kvcache-asan
+kvcache-O0
+w20k.txt
+w200k.txt
+massif.out*
 
 # редактори та системні файли
 .vscode/
