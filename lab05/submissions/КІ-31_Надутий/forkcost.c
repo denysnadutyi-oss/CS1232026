@@ -43,18 +43,46 @@ static double median(double *v, int n)
 
 /* Один fork. touch=1 — дитина пише в кожну сторінку буфера.
  * Повертає час fork() у батька, у *minflt — збої дитини (з wait4). */
+
 static double one_fork(char *buf, size_t size, int touch, long *minflt)
 {
     long page = sysconf(_SC_PAGESIZE);
-    /* TODO 4: виміряти час самого виклику fork() у батька (now_ms до і після).
-     * Дитина: якщо touch — змінити по одному байту в кожній сторінці buf
-     * (крок page), потім одразу _exit(0) — чому не exit і не return?
-     * Батько: дочекатися дитини через wait4 (не waitpid!) і записати в
-     * *minflt поле ru_minflt — сторінкові збої саме цієї дитини.
-     * Не забудьте EINTR. Повернути виміряний час у мілісекундах. */
-    (void)buf; (void)size; (void)touch; (void)page;
-    *minflt = 0;
-    return 0;
+
+    double t0 = now_ms();
+    pid_t pid = fork();
+    double t1 = now_ms();
+
+    if (pid == -1) {
+        perror("forkcost: fork");
+        exit(1);
+    }
+
+    if (pid == 0) {
+        if (touch && buf != NULL) {
+            for (size_t i = 0; i < size; i += (size_t)page) {
+                buf[i]++;
+            }
+        }
+
+        _exit(0);
+    }
+
+    struct rusage usage;
+    int status;
+    pid_t result;
+
+    do {
+        result = wait4(pid, &status, 0, &usage);
+    } while (result == -1 && errno == EINTR);
+
+    if (result == -1) {
+        perror("forkcost: wait4");
+        exit(1);
+    }
+
+    *minflt = usage.ru_minflt;
+
+    return t1 - t0;
 }
 
 static double one_spawn(void)
