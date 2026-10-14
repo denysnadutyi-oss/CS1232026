@@ -71,9 +71,42 @@ static int region_of(const void *addr, char *name, size_t size)
      * [stack] — або «anon», якщо поля немає: snprintf(name, size, "%s %s", ...).
      * Повернути 0, якщо знайдено, і -1 інакше. Формат рядка: man 5 proc,
      * розділ /proc/pid/maps. Підказка: sscanf з %lx і %n. */
-    (void)addr;
-    snprintf(name, size, "TODO");
+
+FILE *f = fopen("/proc/self/maps", "r");
+if (f == NULL)
     return -1;
+
+char line[PATH_MAX + 256];
+unsigned long start, end;
+char perms[5];
+int pos;
+
+while (fgets(line, sizeof line, f) != NULL) {
+    pos = 0;
+
+    if (sscanf(line, "%lx-%lx %4s %*s %*s %*s %n",
+               &start, &end, perms, &pos) != 3)
+        continue;
+
+    unsigned long address = (unsigned long)addr;
+
+    if (address >= start && address < end) {
+        char *path = line + pos;
+
+        path[strcspn(path, "\n")] = '\0';
+
+        if (*path == '\0')
+            path = "anon";
+
+        snprintf(name, size, "%s %s", perms, path);
+        fclose(f);
+        return 0;
+    }
+}
+
+fclose(f);
+return -1;
+
 }
 
 static void print_region(FILE *out, const char *what, const void *addr)
