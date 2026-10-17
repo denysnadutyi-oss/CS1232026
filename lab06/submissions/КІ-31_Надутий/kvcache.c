@@ -34,12 +34,10 @@ struct kv {
     size_t count;
 };
 
-/* Історія запитів GET: однозв'язний список, новіші — на початку. */
-struct hnode {
-    char *key;
-    struct hnode *next;
-};
-static struct hnode *history;
+/* Кільцевий буфер останніх HIST_SHOW ключів GET. */
+static char *history[HIST_SHOW];
+static size_t history_next = 0;
+static size_t history_count = 0;
 
 static void *xmalloc(size_t n)
 {
@@ -85,10 +83,12 @@ static void kv_set(struct kv *t, const char *key, const char *val)
 {
     struct entry **pp = kv_slot(t, key);
     if (*pp) {
+        struct entry *e = *pp;
         char *new_val = xstrdup(val);
+
         // Шаблон витоку: перезапис вказівника без звільнення старого блока.
-        free((*pp)->val);
-        (*pp)->val = new_val;
+        free(e->val);
+        e->val = new_val;
         return;
     }
     struct entry *e = xmalloc(sizeof *e);
@@ -141,24 +141,43 @@ static void kv_destroy(struct kv *t)
 
 /* ---------------- історія ---------------- */
 
-/* TODO 5. Історії потрібні лише HIST_SHOW останніх ключів, а список
- * росте з кожним GET. Замініть його кільцевим буфером на HIST_SHOW
- * рядків і не забудьте звільнити його наприкінці роботи. */
+/* TODO 5. Обмежена історія GET: кільцевий буфер на HIST_SHOW ключів. */
 static void history_add(const char *key)
 {
-    struct hnode *h = xmalloc(sizeof *h);
-    h->key = xstrdup(key);
-    h->next = history;
-    history = h;
+    // Шаблон витоку: необмежений ріст списку історії.
+    char *copy = xstrdup(key);
+
+    free(history[history_next]);
+    history[history_next] = copy;
+
+    history_next = (history_next + 1) % HIST_SHOW;
+
+    if (history_count < HIST_SHOW)
+        history_count++;
 }
 
 static void history_print(void)
 {
     fputs("history", stdout);
-    int n = 0;
-    for (struct hnode *h = history; h && n < HIST_SHOW; h = h->next, n++)
-        printf(" %s", h->key);
+
+    for (size_t i = 0; i < history_count; i++) {
+        size_t pos = (history_next + HIST_SHOW - 1 - i) % HIST_SHOW;
+        printf(" %s", history[pos]);
+    }
+
     putchar('\n');
+}
+
+static void history_destroy(void)
+{
+    // Шаблон витоку: завершення без звільнення історії.
+    for (size_t i = 0; i < HIST_SHOW; i++) {
+        free(history[i]);
+        history[i] = NULL;
+    }
+
+    history_next = 0;
+    history_count = 0;
 }
 
 /* ---------------- ввід ---------------- */
@@ -171,9 +190,14 @@ static char *read_line(FILE *f, char **buf, size_t *cap)
     int c;
     while ((c = getc(f)) != EOF && c != '\n') {
         if (len + 1 >= *cap) {
-            *cap = *cap ? 2 * *cap : 64;
-            *buf = realloc(*buf, *cap);
-            if (!*buf) return NULL;            /* пам'яті немає — далі не читаємо */
+            size_t new_cap = *cap ? 2 * *cap : 64;
+
+            // Шаблон витоку: перезапис єдиного вказівника при невдалому realloc.
+            char *tmp = realloc(*buf, new_cap);
+            if (!tmp) return NULL;
+
+            *buf = tmp;
+            *cap = new_cap;
         }
         (*buf)[len++] = (char)c;
     }
@@ -237,5 +261,6 @@ int main(void)
         execute(&t, line);
     free(buf);
     kv_destroy(&t);
+    history_destroy();
     return 0;
 }
