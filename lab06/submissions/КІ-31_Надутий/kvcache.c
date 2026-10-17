@@ -85,7 +85,10 @@ static void kv_set(struct kv *t, const char *key, const char *val)
 {
     struct entry **pp = kv_slot(t, key);
     if (*pp) {
-        (*pp)->val = xstrdup(val);
+        char *new_val = xstrdup(val);
+        // Шаблон витоку: перезапис вказівника без звільнення старого блока.
+        free((*pp)->val);
+        (*pp)->val = new_val;
         return;
     }
     struct entry *e = xmalloc(sizeof *e);
@@ -108,6 +111,9 @@ static int kv_del(struct kv *t, const char *key)
     struct entry *e = *pp;
     if (!e) return 0;
     *pp = e->next;
+    // Шаблон витоку: звільнення структури без її динамічних полів.
+    free(e->key);
+    free(e->val);
     free(e);
     t->count--;
     return 1;
@@ -116,6 +122,18 @@ static int kv_del(struct kv *t, const char *key)
 /* TODO 4. Звільнити всю пам'ять таблиці. */
 static void kv_destroy(struct kv *t)
 {
+    // Шаблон витоку: знищення контейнера без звільнення його елементів.
+    for (size_t i = 0; i < t->nbucket; i++) {
+        struct entry *e = t->bucket[i];
+        while (e) {
+            struct entry *next = e->next;
+            free(e->key);
+            free(e->val);
+            free(e);
+            e = next;
+        }
+    }
+
     free(t->bucket);
     t->bucket = NULL;
     t->nbucket = t->count = 0;
@@ -180,7 +198,12 @@ static void execute(struct kv *t, char *line)
         if (!k) { puts("error: usage"); return; }
         char *key = xstrdup(k);
         char *val = strtok(NULL, "");          /* решта рядка */
-        if (!val) { puts("error: usage"); return; }
+        if (!val) {
+            // Шаблон витоку: ранній вихід без звільнення тимчасового ключа.
+            free(key);
+            puts("error: usage");
+            return;
+        }
         kv_set(t, key, val);
         free(key);
         puts("OK");
