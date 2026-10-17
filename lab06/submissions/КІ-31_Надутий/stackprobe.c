@@ -70,6 +70,33 @@ static void on_segv(int sig, siginfo_t *si, void *ctx)
  * Помилки — perror і exit(1). */
 static void install_handler(void)
 {
+    size_t stack_size = 64 * 1024;
+    void *stack_mem = malloc(stack_size);
+
+    if (!stack_mem) {
+        perror("malloc");
+        exit(1);
+    }
+
+    stack_t ss = {0};
+    ss.ss_sp = stack_mem;
+    ss.ss_size = stack_size;
+    ss.ss_flags = 0;
+
+    if (sigaltstack(&ss, NULL) == -1) {
+        perror("sigaltstack");
+        exit(1);
+    }
+
+    struct sigaction sa = {0};
+    sa.sa_sigaction = on_segv;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+
+    if (sigaction(SIGSEGV, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
 }
 
 static long recurse(long d)
