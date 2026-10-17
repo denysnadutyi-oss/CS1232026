@@ -123,8 +123,21 @@ static int lands_in_mmap(size_t size, int prefree)
  * Якщо навіть hi іде в купу, повернути 0. */
 static size_t find_threshold(size_t hi, int prefree)
 {
-    (void)hi; (void)prefree;
-    return 0;
+    if (hi == 0 || !lands_in_mmap(hi, prefree))
+        return 0;
+
+    size_t lo = 1;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (lands_in_mmap(mid, prefree))
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+
+    return lo;
 }
 
 static void do_threshold(void)
