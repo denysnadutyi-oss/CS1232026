@@ -11,3 +11,11 @@
 # Службу вказувати не треба: таймер lab08-stamp.timer запускає lab08-stamp.service.
 [Unit]
 Description=ЛР 8: запускати lab08-stamp кожні дві хвилини
+
+[Timer]
+OnCalendar=*-*-* *:00/2:00
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
