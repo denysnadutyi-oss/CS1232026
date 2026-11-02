@@ -82,8 +82,30 @@ static double cost_ns(clockid_t id, int raw, long n)
      * MONOTONIC (now_ns) і діліть на n. Повторіть SERIES разів і поверніть
      * медіану (qsort + cmp_double). Перед вимірюванням зробіть кілька
      * тисяч читань «на розігрів». */
-    (void)id; (void)raw; (void)n; (void)read_clock;
-    return 0.0;
+    struct timespec t;
+    double results[SERIES];
+
+    /* Розігрів перед вимірюваннями. */
+    for (int i = 0; i < 5000; i++) {
+        if (read_clock(id, raw, &t) != 0)
+            return 0.0;
+    }
+
+    /* SERIES вимірювань по n читань. */
+    for (int i = 0; i < SERIES; i++) {
+        int64_t start = now_ns();
+
+        for (long j = 0; j < n; j++) {
+            if (read_clock(id, raw, &t) != 0)
+                return 0.0;
+        }
+
+        int64_t elapsed = now_ns() - start;
+        results[i] = (double)elapsed / (double)n;
+    }
+
+    qsort(results, SERIES, sizeof results[0], cmp_double);
+    return results[SERIES / 2];
 }
 
 static void cmd_info(void)
