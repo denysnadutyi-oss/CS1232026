@@ -74,10 +74,31 @@ static void wait_abs(struct timespec *next, int64_t period_ns, long *missed)
      * Увага: clock_nanosleep повертає номер помилки, а не −1 з errno.
      * Перерваний сигналом сон (EINTR) повторіть, якщо не встановлено
      * stop_requested. */
-    (void)missed;
-    struct timespec p = ns_ts(period_ns);
-    nanosleep(&p, NULL);
-    *next = ns_ts(now_ns());
+    int64_t deadline = ts_ns(next) + period_ns;
+    int64_t now = now_ns();
+
+    /* Пропускаємо дедлайни, які вже минули. */
+    if (deadline <= now) {
+        int64_t skipped = (now - deadline) / period_ns + 1;
+        deadline += skipped * period_ns;
+        *missed += (long)skipped;
+    }
+
+    *next = ns_ts(deadline);
+
+    /* Чекаємо абсолютного моменту, не накопичуючи дрейф. */
+    while (!stop_requested) {
+        int err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+                                  next, NULL);
+        if (err == 0)
+            break;
+        if (err == EINTR)
+            continue;
+
+        errno = err;
+        perror("clock_nanosleep");
+        exit(1);
+    }
 }
 
 static int cmp_i64(const void *a, const void *b)
