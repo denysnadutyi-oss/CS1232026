@@ -1,0 +1,13 @@
+# ЛР 8, частина 5. Служба користувача: ticker log пише рядок щосекунди,
+# systemd збирає його stdout у журнал і перезапускає програму, якщо та впала.
+[Unit]
+Description=ЛР 8: пульс ticker раз на секунду
+
+[Service]
+ExecStart=%h/.local/lib/lab08/ticker log 1000
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

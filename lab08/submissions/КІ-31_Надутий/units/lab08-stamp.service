@@ -1,0 +1,8 @@
+# ЛР 8, частина 5. Одноразова служба: надрукувати, котра година в трьох зонах.
+# Її запускає таймер lab08-stamp.timer; без таймера — systemctl --user start.
+[Unit]
+Description=ЛР 8: котра година в трьох зонах
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/lib/lab08/whenis now Europe/Kyiv UTC America/New_York
