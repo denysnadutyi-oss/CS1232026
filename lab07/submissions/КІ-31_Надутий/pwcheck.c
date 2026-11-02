@@ -174,7 +174,52 @@ static int converse(int n, const struct pam_message **msg,
      *    їх) і повернути PAM_CONV_ERR.
      * Масив відповідей r виділяється calloc на n елементів; при успіху
      * записати його в *resp і повернути PAM_SUCCESS. */
-    (void)n; (void)msg; (void)resp;
+    if (n <= 0 || !msg || !resp)
+        return PAM_CONV_ERR;
+
+    *resp = NULL;
+    struct pam_response *r = calloc((size_t)n, sizeof *r);
+    if (!r)
+        return PAM_BUF_ERR;
+
+    for (int i = 0; i < n; i++) {
+        if (!msg[i]) goto fail;
+
+        int style = msg[i]->msg_style;
+
+        if (style == PAM_PROMPT_ECHO_OFF || style == PAM_PROMPT_ECHO_ON) {
+            char buf[PWMAX] = {0};
+
+            if (read_secret(msg[i]->msg ? msg[i]->msg : "",
+                            buf, sizeof buf,
+                            style == PAM_PROMPT_ECHO_ON) != 0) {
+                explicit_bzero(buf, sizeof buf);
+                goto fail;
+            }
+
+            r[i].resp = strdup(buf);
+            explicit_bzero(buf, sizeof buf);
+
+            if (!r[i].resp)
+                goto fail;
+        } else if (style == PAM_ERROR_MSG || style == PAM_TEXT_INFO) {
+            fprintf(stderr, "%s\n", msg[i]->msg ? msg[i]->msg : "");
+        } else {
+            goto fail;
+        }
+    }
+
+    *resp = r;
+    return PAM_SUCCESS;
+
+fail:
+    for (int i = 0; i < n; i++) {
+        if (r[i].resp) {
+            explicit_bzero(r[i].resp, strlen(r[i].resp));
+            free(r[i].resp);
+        }
+    }
+    free(r);
     return PAM_CONV_ERR;
 }
 
