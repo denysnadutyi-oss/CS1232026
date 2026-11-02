@@ -86,8 +86,20 @@ static int check_password(const char *pw, const char *stored)
      *  — помилку libxcrypt повідомляє рядком, що починається з '*', або NULL;
      *  — порівнюйте функцією same(), а не strcmp: чому — питання 6;
      *  — перед поверненням затріть struct crypt_data (explicit_bzero). */
-    (void)pw; (void)stored; (void)same;
-    return -1;
+    struct crypt_data *cd = calloc(1, sizeof *cd);
+    if (!cd)
+        return -1;
+
+    char *computed = crypt_rn(pw, stored, cd, sizeof *cd);
+    int result = -1;
+
+    if (computed != NULL && computed[0] != '*')
+        result = same(computed, stored);
+
+    explicit_bzero(cd, sizeof *cd);
+    free(cd);
+
+    return result;
 }
 
 static int do_verify(const char *stored)
