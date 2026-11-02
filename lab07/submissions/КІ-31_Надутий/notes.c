@@ -48,12 +48,49 @@ static const char *store_path(void)
  * цьому перевіркою і завершіть процес, якщо це не так. */
 static void drop_privileges(void)
 {
-    /* TODO 5. Зробіть справжній, ефективний і збережений GID рівними
-     * справжньому GID, потім те саме для UID (setresgid, setresuid; чому
-     * саме в такому порядку — питання 9). Перевіряйте код повернення
-     * кожного виклику. Потім переконайтеся, що повернути ефективний UID
-     * і GID, з якими програма стартувала, неможливо, і завершіть процес
-     * з кодом 2, якщо це не так. */
+    /* TODO 5. Назавжди скинути привілеї. */
+    uid_t ruid = getuid();
+    uid_t old_euid = geteuid();
+    gid_t rgid = getgid();
+    gid_t old_egid = getegid();
+
+    if (setresgid(rgid, rgid, rgid) != 0)
+        die("setresgid");
+
+    if (setresuid(ruid, ruid, ruid) != 0)
+        die("setresuid");
+
+    uid_t r, e, saved;
+    gid_t gr, ge, gs;
+
+    if (getresuid(&r, &e, &saved) != 0)
+        die("getresuid");
+
+    if (getresgid(&gr, &ge, &gs) != 0)
+        die("getresgid");
+
+    if (r != ruid || e != ruid || saved != ruid ||
+        gr != rgid || ge != rgid || gs != rgid) {
+        fprintf(stderr, "notes: привілеї скинуто не повністю\n");
+        exit(2);
+    }
+
+    /* Перевірити, що старі привілейовані ID не можна відновити. */
+    if (old_euid != ruid) {
+        errno = 0;
+        if (seteuid(old_euid) == 0 || errno != EPERM) {
+            fprintf(stderr, "notes: можна повернути UID\n");
+            exit(2);
+        }
+    }
+
+    if (old_egid != rgid) {
+        errno = 0;
+        if (setegid(old_egid) == 0 || errno != EPERM) {
+            fprintf(stderr, "notes: можна повернути GID\n");
+            exit(2);
+        }
+    }
 }
 
 static void print_id(void)
