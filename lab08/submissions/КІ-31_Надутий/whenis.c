@@ -73,10 +73,43 @@ static int wall_to_utc(const char *zone, const struct tm *wall, time_t out[2])
      *   рік, місяць, день, година, хвилина І tm_isdst збіглися із запитаними.
      *   Якщо так — це справжній розв'язок. Однакові розв'язки не дублюйте,
      *   результати впорядкуйте за зростанням. */
-    struct tm t = *wall;
-    t.tm_isdst = -1;
-    out[0] = mktime(&t);
-    return 1;
+    int count = 0;
+
+    for (int isdst = 0; isdst <= 1; isdst++) {
+        struct tm candidate = *wall;
+        candidate.tm_isdst = isdst;
+
+        time_t utc = mktime(&candidate);
+
+        struct tm back;
+        if (localtime_r(&utc, &back) == NULL)
+            continue;
+
+        /* mktime може нормалізувати неіснуючий місцевий час.
+         * Зворотне перетворення дозволяє відкинути такий результат. */
+        if (back.tm_year != wall->tm_year ||
+            back.tm_mon  != wall->tm_mon  ||
+            back.tm_mday != wall->tm_mday ||
+            back.tm_hour != wall->tm_hour ||
+            back.tm_min  != wall->tm_min  ||
+            back.tm_isdst != isdst)
+            continue;
+
+        /* Не додаємо однакові моменти двічі. */
+        if (count > 0 && out[0] == utc)
+            continue;
+
+        out[count++] = utc;
+    }
+
+    /* UTC-моменти повинні бути впорядковані за зростанням. */
+    if (count == 2 && out[0] > out[1]) {
+        time_t temp = out[0];
+        out[0] = out[1];
+        out[1] = temp;
+    }
+
+    return count;
 }
 
 static int cmd_conv(int argc, char **argv)
