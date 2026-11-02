@@ -86,7 +86,23 @@ static int parse_number(const char *s, double *out)
      * Перепишіть: розбирайте за правилами локалі "C", не змінюючи локаль
      * процесу (newlocale + strtod_l; об'єкт локалі створіть один раз),
      * і повертайте −1, якщо після числа щось залишилося або числа немає. */
-    *out = strtod(s, NULL);
+    static locale_t c_locale = (locale_t)0;
+
+    if (c_locale == (locale_t)0) {
+        c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+        if (c_locale == (locale_t)0) {
+            perror("newlocale");
+            return -1;
+        }
+    }
+
+    char *end;
+    double value = strtod_l(s, &end, c_locale);
+
+    if (end == s || *end != '\0')
+        return -1;
+
+    *out = value;
     return 0;
 }
 
@@ -97,7 +113,27 @@ static void format_number(double v, char *buf, size_t n)
      * вийде «3,5», і наступна програма такого файла не прочитає.
      * Перемкніть локаль лише для цього потоку (uselocale) на "C",
      * відформатуйте і поверніть попередню. */
+    locale_t c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    if (c_locale == (locale_t)0) {
+        perror("newlocale");
+        exit(1);
+    }
+
+    locale_t previous = uselocale(c_locale);
+    if (previous == (locale_t)0) {
+        perror("uselocale");
+        freelocale(c_locale);
+        exit(1);
+    }
+
     snprintf(buf, n, "%.17g", v);
+
+    if (uselocale(previous) == (locale_t)0) {
+        perror("uselocale restore");
+        exit(1);
+    }
+
+    freelocale(c_locale);
 }
 
 static char *trim(char *s)
