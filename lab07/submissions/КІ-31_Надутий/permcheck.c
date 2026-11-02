@@ -51,8 +51,23 @@ static int decide(mode_t mode, uid_t owner, gid_t group, int want,
      *  — інакше обирається рівно один клас: власник, якщо UID збігся;
      *    група, якщо група файла є серед груп процесу; решта — інші;
      *  — дозвіл, якщо в обраному класі є всі запитані біти. */
-    (void)mode; (void)owner; (void)group; (void)want; (void)c;
-    return 0;
+    if (c->uid == 0) {
+        if ((want & WANT_X) && S_ISREG(mode) &&
+            !(mode & (S_IXUSR | S_IXGRP | S_IXOTH)))
+            return 0;
+        return 1;
+    }
+
+    int bits;
+
+    if (c->uid == owner)
+        bits = (mode >> 6) & 7;
+    else if (in_groups(c, group))
+        bits = (mode >> 3) & 7;
+    else
+        bits = mode & 7;
+
+    return (bits & want) == want;
 }
 
 /* ---------------- decide ---------------- */
