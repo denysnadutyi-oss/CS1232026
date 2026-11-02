@@ -57,12 +57,33 @@ static gid_t *user_groups(const char *user, gid_t primary, int *count)
      * Отримайте повний список getgrouplist: якщо масиву замало, функція
      * повертає -1 і записує в *ngroups потрібний розмір — збільште масив
      * і повторіть. Не покладайтеся на сталий розмір масиву. */
-    (void)user;
-    gid_t *g = malloc(sizeof *g);
+    int n = 1;
+    gid_t *g = malloc((size_t)n * sizeof *g);
     if (!g) return NULL;
-    g[0] = primary;
-    *count = 1;
-    return g;
+
+    for (;;) {
+        int needed = n;
+        int rc = getgrouplist(user, primary, g, &needed);
+
+        if (rc >= 0) {
+            *count = needed;
+            return g;
+        }
+
+        if (needed <= n) {
+            free(g);
+            return NULL;
+        }
+
+        gid_t *tmp = realloc(g, (size_t)needed * sizeof *g);
+        if (!tmp) {
+            free(g);
+            return NULL;
+        }
+
+        g = tmp;
+        n = needed;
+    }
 }
 
 static int print_user(const char *name)
